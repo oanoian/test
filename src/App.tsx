@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import MapView from './components/MapView';
+import CustomMap from './components/CustomMap';
 import Sidebar from './components/Sidebar';
 import { MarkerData, CategoryType } from './types';
 import { initialMarkers, CATEGORIES } from './data';
@@ -10,15 +10,21 @@ function App() {
   const [isAddingMode, setIsAddingMode] = useState(false);
   const [pendingLocation, setPendingLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [showMunicipalities, setShowMunicipalities] = useState(true);
+  const [showLabels, setShowLabels] = useState(true);
+  const [showRivers, setShowRivers] = useState(true);
+  const [showMountains, setShowMountains] = useState(true);
 
   const handleMapClick = useCallback((lat: number, lng: number) => {
-    setPendingLocation({ lat, lng });
-    setIsAddingMode(false);
-  }, []);
+    if (isAddingMode) {
+      setPendingLocation({ lat, lng });
+      setIsAddingMode(false);
+    }
+  }, [isAddingMode]);
 
   const handleMarkerClick = useCallback((id: string) => {
-    setSelectedMarker(id);
-  }, []);
+    setSelectedMarker(id === selectedMarker ? null : id);
+  }, [selectedMarker]);
 
   const handleAddMarker = () => {
     setIsAddingMode(true);
@@ -90,31 +96,30 @@ function App() {
           pendingLocation={pendingLocation}
           onConfirmAdd={handleConfirmAdd}
           onCancelAdd={handleCancelAdd}
+          showMunicipalities={showMunicipalities}
+          setShowMunicipalities={setShowMunicipalities}
+          showLabels={showLabels}
+          setShowLabels={setShowLabels}
+          showRivers={showRivers}
+          setShowRivers={setShowRivers}
+          showMountains={showMountains}
+          setShowMountains={setShowMountains}
         />
       </div>
 
       {/* Map Area */}
       <div className="flex-1 relative">
-        <MapView
+        <CustomMap
           markers={markers}
           selectedMarker={selectedMarker}
           onMapClick={handleMapClick}
           onMarkerClick={handleMarkerClick}
           isAddingMode={isAddingMode}
+          showMunicipalities={showMunicipalities}
+          showLabels={showLabels}
+          showRivers={showRivers}
+          showMountains={showMountains}
         />
-
-        {/* Map Legend */}
-        <div className="absolute bottom-4 right-4 z-10 bg-white/95 backdrop-blur-sm rounded-xl shadow-lg p-3 max-w-[200px]">
-          <h4 className="text-xs font-bold text-slate-700 mb-2">Legend</h4>
-          <div className="grid grid-cols-2 gap-1.5">
-            {Object.entries(CATEGORIES).map(([key, info]) => (
-              <div key={key} className="flex items-center gap-1.5">
-                <span className="text-sm">{info.icon}</span>
-                <span className="text-xs text-slate-600">{info.label}</span>
-              </div>
-            ))}
-          </div>
-        </div>
 
         {/* Adding Mode Indicator */}
         {isAddingMode && (
@@ -131,19 +136,32 @@ function App() {
         )}
 
         {/* Stats Bar */}
-        <div className="absolute top-4 right-4 z-10 bg-white/95 backdrop-blur-sm rounded-xl shadow-lg px-4 py-2">
+        <div className="absolute top-4 right-4 z-10 bg-slate-800/95 backdrop-blur-sm rounded-xl shadow-lg px-4 py-2 border border-slate-700">
           <div className="flex items-center gap-4">
             <div className="text-center">
-              <div className="text-lg font-bold text-slate-800">{markers.length}</div>
-              <div className="text-xs text-slate-500">Markers</div>
+              <div className="text-lg font-bold text-white">{markers.length}</div>
+              <div className="text-xs text-slate-400">Markers</div>
             </div>
-            <div className="w-px h-8 bg-slate-200"></div>
+            <div className="w-px h-8 bg-slate-600"></div>
             <div className="text-center">
-              <div className="text-lg font-bold text-blue-600">
+              <div className="text-lg font-bold text-amber-400">
                 {new Set(markers.map(m => m.category)).size}
               </div>
-              <div className="text-xs text-slate-500">Categories</div>
+              <div className="text-xs text-slate-400">Categories</div>
             </div>
+            <div className="w-px h-8 bg-slate-600"></div>
+            <div className="text-center">
+              <div className="text-lg font-bold text-green-400">48</div>
+              <div className="text-xs text-slate-400">Towns</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Map Controls Help */}
+        <div className="absolute bottom-4 left-4 z-10 bg-slate-800/90 backdrop-blur-sm rounded-lg shadow-lg px-3 py-2 border border-slate-700 text-xs text-slate-400">
+          <div className="flex items-center gap-3">
+            <span>🖱️ Scroll to zoom</span>
+            <span>⇧+Drag to pan</span>
           </div>
         </div>
       </div>
