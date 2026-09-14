@@ -1,375 +1,441 @@
 import { useRef, useState, useCallback } from 'react';
-import { MarkerData } from '../types';
+import { MarkerData, LineData, MarkerShape, MapState } from '../types';
+import { MARKER_SHAPES, LINE_STYLES } from '../types';
 import {
-  PROVINCE_BOUNDARY,
-  PROVINCE_BOUNDS,
-  LINGAYEN_GULF,
-  AGNO_RIVER,
-  CORDILLERA_RANGE,
-  ZAMBALES_RANGE,
-  HUNDRED_ISLANDS,
-  MUNICIPALITIES,
-  CATEGORIES,
+  PROVINCE_BOUNDARY, PROVINCE_BOUNDS, LINGAYEN_GULF, AGNO_RIVER,
+  BAYAMBANG_RIVER, FABRICATION_RIVER, CORDILLERA_RANGE, ZAMBALES_RANGE,
+  HUNDRED_ISLANDS, MUNICIPALITIES, ROADS,
 } from '../data';
 import { latLngToSvg, svgToLatLng, pointsToPath } from '../utils/geo';
 
 interface CustomMapProps {
-  markers: MarkerData[];
-  selectedMarker: string | null;
+  state: MapState;
   onMapClick: (lat: number, lng: number) => void;
   onMarkerClick: (id: string) => void;
-  isAddingMode: boolean;
-  showMunicipalities: boolean;
-  showLabels: boolean;
-  showRivers: boolean;
-  showMountains: boolean;
+  onLineClick: (id: string) => void;
+  onMarkerDrag: (id: string, lat: number, lng: number) => void;
 }
 
 const MAP_WIDTH = 1200;
 const MAP_HEIGHT = 900;
 const PADDING = 60;
 
-export default function CustomMap({
-  markers,
-  selectedMarker,
-  onMapClick,
-  onMarkerClick,
-  isAddingMode,
-  showMunicipalities,
-  showLabels,
-  showRivers,
-  showMountains,
-}: CustomMapProps) {
+function renderMarkerShape(shape: MarkerShape, color: string, size: number): JSX.Element {
+  const s = size;
+  switch (shape) {
+    case 'dot':
+      return <circle cx="0" cy="0" r={s / 2} fill={color} stroke="white" strokeWidth="1.5" />;
+    case 'pin':
+      return (
+        <g>
+          <path d={`M 0 ${-s * 1.5} C ${-s * 0.6} ${-s * 1.5} ${-s} ${-s} ${-s} ${-s * 0.5} C ${-s} ${s * 0.3} 0 ${s * 0.8} 0 ${s * 0.8} C 0 ${s * 0.8} ${s} ${s * 0.3} ${s} ${-s * 0.5} C ${s} ${-s} ${s * 0.6} ${-s * 1.5} 0 ${-s * 1.5} Z`}
+            fill={color} stroke="white" strokeWidth="1.5" />
+          <circle cx="0" cy={-s * 0.6} r={s * 0.3} fill="white" opacity="0.8" />
+        </g>
+      );
+    case 'landmark':
+      return (
+        <g>
+          <rect x={-s * 0.6} y={-s * 0.3} width={s * 1.2} height={s * 0.8} fill={color} stroke="white" strokeWidth="1.5" />
+          <polygon points={`0,${-s} ${-s * 0.7},${-s * 0.3} ${s * 0.7},${-s * 0.3}`} fill={color} stroke="white" strokeWidth="1.5" />
+          <rect x={-s * 0.15} y={-s * 0.1} width={s * 0.3} height={s * 0.5} fill="white" opacity="0.6" />
+        </g>
+      );
+    case 'warning':
+      return (
+        <g>
+          <polygon points={`0,${-s} ${-s * 0.9},${s * 0.6} ${s * 0.9},${s * 0.6}`} fill={color} stroke="white" strokeWidth="2" />
+          <text x="0" y={s * 0.3} textAnchor="middle" fontSize={s * 0.8} fill="white" fontWeight="bold">!</text>
+        </g>
+      );
+    case 'alert':
+      return (
+        <g>
+          <circle cx="0" cy="0" r={s * 0.7} fill={color} stroke="white" strokeWidth="2" />
+          <circle cx="0" cy="0" r={s * 0.4} fill="white" opacity="0.3" />
+          <circle cx="0" cy="0" r={s} fill="none" stroke={color} strokeWidth="1" opacity="0.5" strokeDasharray="3,2" />
+        </g>
+      );
+    case 'grid-ref':
+      return (
+        <g>
+          <rect x={-s * 0.5} y={-s * 0.5} width={s} height={s} fill="none" stroke={color} strokeWidth="2" />
+          <line x1={-s * 0.3} y1="0" x2={s * 0.3} y2="0" stroke={color} strokeWidth="1.5" />
+          <line x1="0" y1={-s * 0.3} x2="0" y2={s * 0.3} stroke={color} strokeWidth="1.5" />
+        </g>
+      );
+    case 'cross':
+      return (
+        <g>
+          <line x1={-s * 0.6} y1={-s * 0.6} x2={s * 0.6} y2={s * 0.6} stroke={color} strokeWidth="2.5" />
+          <line x1={s * 0.6} y1={-s * 0.6} x2={-s * 0.6} y2={s * 0.6} stroke={color} strokeWidth="2.5" />
+          <circle cx="0" cy="0" r={s * 0.2} fill={color} />
+        </g>
+      );
+    case 'diamond':
+      return (
+        <polygon points={`0,${-s * 0.8} ${s * 0.6},0 0,${s * 0.8} ${-s * 0.6},0`}
+          fill={color} stroke="white" strokeWidth="1.5" />
+      );
+    case 'star':
+      return (
+        <polygon points={Array.from({ length: 10 }, (_, i) => {
+          const angle = (i * 36 - 90) * Math.PI / 180;
+          const r = i % 2 === 0 ? s * 0.8 : s * 0.35;
+          return `${Math.cos(angle) * r},${Math.sin(angle) * r}`;
+        }).join(' ')} fill={color} stroke="white" strokeWidth="1.5" />
+      );
+    case 'flag':
+      return (
+        <g>
+          <line x1="0" y1={-s} x2="0" y2={s * 0.5} stroke={color} strokeWidth="2" />
+          <polygon points={`0,${-s} ${s * 0.7},${-s * 0.6} 0,${-s * 0.2}`} fill={color} />
+          <circle cx="0" cy={s * 0.5} r={2} fill={color} />
+        </g>
+      );
+    case 'circle':
+      return (
+        <g>
+          <circle cx="0" cy="0" r={s * 0.6} fill="none" stroke={color} strokeWidth="2.5" />
+          <circle cx="0" cy="0" r={s * 0.15} fill={color} />
+        </g>
+      );
+    case 'square':
+      return (
+        <rect x={-s * 0.5} y={-s * 0.5} width={s} height={s} fill={color} stroke="white" strokeWidth="1.5" />
+      );
+    case 'triangle':
+      return (
+        <polygon points={`0,${-s * 0.8} ${-s * 0.7},${s * 0.5} ${s * 0.7},${s * 0.5}`}
+          fill={color} stroke="white" strokeWidth="1.5" />
+      );
+    case 'hexagon':
+      return (
+        <polygon points={Array.from({ length: 6 }, (_, i) => {
+          const angle = (i * 60 - 30) * Math.PI / 180;
+          return `${Math.cos(angle) * s * 0.7},${Math.sin(angle) * s * 0.7}`;
+        }).join(' ')} fill={color} stroke="white" strokeWidth="1.5" />
+      );
+    case 'building':
+      return (
+        <g>
+          <rect x={-s * 0.5} y={-s * 0.8} width={s} height={s * 1.2} fill={color} stroke="white" strokeWidth="1.5" rx="1" />
+          <rect x={-s * 0.3} y={-s * 0.6} width={s * 0.2} height={s * 0.2} fill="white" opacity="0.5" />
+          <rect x={s * 0.1} y={-s * 0.6} width={s * 0.2} height={s * 0.2} fill="white" opacity="0.5" />
+          <rect x={-s * 0.3} y={-s * 0.2} width={s * 0.2} height={s * 0.2} fill="white" opacity="0.5" />
+          <rect x={s * 0.1} y={-s * 0.2} width={s * 0.2} height={s * 0.2} fill="white" opacity="0.5" />
+          <rect x={-s * 0.15} y={s * 0.1} width={s * 0.3} height={s * 0.3} fill="white" opacity="0.5" />
+        </g>
+      );
+    default:
+      return <circle cx="0" cy="0" r={s / 2} fill={color} />;
+  }
+}
+
+export default function CustomMap({ state, onMapClick, onMarkerClick, onLineClick, onMarkerDrag }: CustomMapProps) {
   const svgRef = useRef<SVGSVGElement>(null);
-  const [hoveredMarker, setHoveredMarker] = useState<string | null>(null);
-  const [tooltip, setTooltip] = useState<{ x: number; y: number; marker: MarkerData } | null>(null);
   const [viewBox, setViewBox] = useState({ x: 0, y: 0, w: MAP_WIDTH, h: MAP_HEIGHT });
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+  const [draggingMarker, setDraggingMarker] = useState<string | null>(null);
+  const [hoveredMarker, setHoveredMarker] = useState<string | null>(null);
+  const [cursorPos, setCursorPos] = useState<{ lat: number; lng: number; x: number; y: number } | null>(null);
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null);
 
-  const handleSvgClick = useCallback(
-    (e: React.MouseEvent<SVGSVGElement>) => {
-      if (!svgRef.current || isPanning) return;
-      
-      const rect = svgRef.current.getBoundingClientRect();
-      const scaleX = viewBox.w / rect.width;
-      const scaleY = viewBox.h / rect.height;
-      const svgX = (e.clientX - rect.left) * scaleX + viewBox.x;
-      const svgY = (e.clientY - rect.top) * scaleY + viewBox.y;
-      
-      const { lat, lng } = svgToLatLng(svgX, svgY, MAP_WIDTH, MAP_HEIGHT, PADDING);
-      onMapClick(lat, lng);
-    },
-    [onMapClick, viewBox, isPanning]
-  );
+  const getSvgCoords = useCallback((e: React.MouseEvent) => {
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect) return { svgX: 0, svgY: 0 };
+    const scaleX = viewBox.w / rect.width;
+    const scaleY = viewBox.h / rect.height;
+    return {
+      svgX: (e.clientX - rect.left) * scaleX + viewBox.x,
+      svgY: (e.clientY - rect.top) * scaleY + viewBox.y,
+    };
+  }, [viewBox]);
+
+  const handleSvgClick = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
+    if (isPanning || draggingMarker) return;
+    const { svgX, svgY } = getSvgCoords(e);
+    const { lat, lng } = svgToLatLng(svgX, svgY, MAP_WIDTH, MAP_HEIGHT, PADDING);
+    onMapClick(lat, lng);
+  }, [onMapClick, getSvgCoords, isPanning, draggingMarker]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
-    const factor = e.deltaY > 0 ? 1.1 : 0.9;
-    
+    const factor = e.deltaY > 0 ? 1.15 : 0.87;
     const rect = svgRef.current?.getBoundingClientRect();
     if (!rect) return;
-    
     const mouseX = ((e.clientX - rect.left) / rect.width) * viewBox.w + viewBox.x;
     const mouseY = ((e.clientY - rect.top) / rect.height) * viewBox.h + viewBox.y;
-    
-    const newW = Math.max(200, Math.min(MAP_WIDTH * 2, viewBox.w * factor));
-    const newH = Math.max(150, Math.min(MAP_HEIGHT * 2, viewBox.h * factor));
-    
+    const newW = Math.max(150, Math.min(MAP_WIDTH * 3, viewBox.w * factor));
+    const newH = Math.max(112, Math.min(MAP_HEIGHT * 3, viewBox.h * factor));
     const newX = mouseX - (mouseX - viewBox.x) * (newW / viewBox.w);
     const newY = mouseY - (mouseY - viewBox.y) * (newH / viewBox.h);
-    
     setViewBox({ x: newX, y: newY, w: newW, h: newH });
   }, [viewBox]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
+    if (e.button === 1 || state.toolMode === 'pan' || (e.button === 0 && e.altKey)) {
       setIsPanning(true);
       setPanStart({ x: e.clientX, y: e.clientY });
+      e.preventDefault();
     }
-  }, []);
+  }, [state.toolMode]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!isPanning) return;
-    const rect = svgRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    
-    const dx = (e.clientX - panStart.x) * (viewBox.w / rect.width);
-    const dy = (e.clientY - panStart.y) * (viewBox.h / rect.height);
-    
-    setViewBox(prev => ({ ...prev, x: prev.x - dx, y: prev.y - dy }));
-    setPanStart({ x: e.clientX, y: e.clientY });
-  }, [isPanning, panStart, viewBox]);
+    // Update cursor position
+    const { svgX, svgY } = getSvgCoords(e);
+    const { lat, lng } = svgToLatLng(svgX, svgY, MAP_WIDTH, MAP_HEIGHT, PADDING);
+    setCursorPos({ lat, lng, x: e.clientX, y: e.clientY });
+
+    if (isPanning) {
+      const rect = svgRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const dx = (e.clientX - panStart.x) * (viewBox.w / rect.width);
+      const dy = (e.clientY - panStart.y) * (viewBox.h / rect.height);
+      setViewBox(prev => ({ ...prev, x: prev.x - dx, y: prev.y - dy }));
+      setPanStart({ x: e.clientX, y: e.clientY });
+    }
+
+    if (draggingMarker) {
+      const { lat, lng } = svgToLatLng(svgX, svgY, MAP_WIDTH, MAP_HEIGHT, PADDING);
+      let finalLat = lat;
+      let finalLng = lng;
+      if (state.snapToGrid) {
+        const gs = state.grid.spacing;
+        finalLat = Math.round(lat / gs) * gs;
+        finalLng = Math.round(lng / gs) * gs;
+      }
+      onMarkerDrag(draggingMarker, finalLat, finalLng);
+    }
+  }, [isPanning, panStart, viewBox, getSvgCoords, draggingMarker, state.snapToGrid, state.grid.spacing, onMarkerDrag]);
 
   const handleMouseUp = useCallback(() => {
     setIsPanning(false);
+    setDraggingMarker(null);
   }, []);
 
-  // Generate grid lines
-  const gridLines = [];
-  for (let lat = 15.5; lat <= 16.5; lat += 0.25) {
-    const p1 = latLngToSvg(lat, PROVINCE_BOUNDS.west, MAP_WIDTH, MAP_HEIGHT, PADDING);
-    const p2 = latLngToSvg(lat, PROVINCE_BOUNDS.east, MAP_WIDTH, MAP_HEIGHT, PADDING);
-    gridLines.push(
-      <line key={`lat-${lat}`} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="#94a3b8" strokeWidth="0.5" strokeDasharray="4,4" opacity="0.3" />
-    );
-    gridLines.push(
-      <text key={`lat-label-${lat}`} x={p1.x - 5} y={p1.y + 3} fontSize="8" fill="#64748b" textAnchor="end">{lat.toFixed(2)}°N</text>
-    );
-  }
-  for (let lng = 119.5; lng <= 121.0; lng += 0.25) {
-    const p1 = latLngToSvg(PROVINCE_BOUNDS.north, lng, MAP_WIDTH, MAP_HEIGHT, PADDING);
-    const p2 = latLngToSvg(PROVINCE_BOUNDS.south, lng, MAP_WIDTH, MAP_HEIGHT, PADDING);
-    gridLines.push(
-      <line key={`lng-${lng}`} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="#94a3b8" strokeWidth="0.5" strokeDasharray="4,4" opacity="0.3" />
-    );
-    gridLines.push(
-      <text key={`lng-label-${lng}`} x={p1.x} y={p1.y - 5} fontSize="8" fill="#64748b" textAnchor="middle">{lng.toFixed(2)}°E</text>
-    );
+  const handleMarkerMouseDown = useCallback((e: React.MouseEvent, id: string) => {
+    if (state.toolMode === 'select') {
+      e.stopPropagation();
+      setDraggingMarker(id);
+      onMarkerClick(id);
+    }
+  }, [state.toolMode, onMarkerClick]);
+
+  // Grid lines
+  const gridLines: JSX.Element[] = [];
+  if (state.grid.visible) {
+    const { north, south, west, east } = PROVINCE_BOUNDS;
+    const gs = state.grid.spacing;
+    const mgs = state.grid.minorSpacing;
+
+    // Minor grid
+    if (state.grid.showMinor) {
+      for (let lat = Math.floor(south / mgs) * mgs; lat <= north; lat += mgs) {
+        const p1 = latLngToSvg(lat, west, MAP_WIDTH, MAP_HEIGHT, PADDING);
+        const p2 = latLngToSvg(lat, east, MAP_WIDTH, MAP_HEIGHT, PADDING);
+        gridLines.push(
+          <line key={`mlat-${lat}`} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
+            stroke={state.grid.color} strokeWidth="0.3" opacity={state.grid.opacity * 0.4} />
+        );
+      }
+      for (let lng = Math.floor(west / mgs) * mgs; lng <= east; lng += mgs) {
+        const p1 = latLngToSvg(north, lng, MAP_WIDTH, MAP_HEIGHT, PADDING);
+        const p2 = latLngToSvg(south, lng, MAP_WIDTH, MAP_HEIGHT, PADDING);
+        gridLines.push(
+          <line key={`mlng-${lng}`} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
+            stroke={state.grid.color} strokeWidth="0.3" opacity={state.grid.opacity * 0.4} />
+        );
+      }
+    }
+
+    // Major grid
+    for (let lat = Math.floor(south / gs) * gs; lat <= north; lat += gs) {
+      const p1 = latLngToSvg(lat, west, MAP_WIDTH, MAP_HEIGHT, PADDING);
+      const p2 = latLngToSvg(lat, east, MAP_WIDTH, MAP_HEIGHT, PADDING);
+      gridLines.push(
+        <line key={`lat-${lat}`} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
+          stroke={state.grid.color} strokeWidth="0.6" opacity={state.grid.opacity} />
+      );
+      if (state.grid.showLabels) {
+        gridLines.push(
+          <text key={`lat-l-${lat}`} x={p1.x - 4} y={p1.y + 3} fontSize="7"
+            fill={state.grid.color} textAnchor="end" opacity="0.8">{lat.toFixed(2)}°N</text>
+        );
+      }
+    }
+    for (let lng = Math.floor(west / gs) * gs; lng <= east; lng += gs) {
+      const p1 = latLngToSvg(north, lng, MAP_WIDTH, MAP_HEIGHT, PADDING);
+      const p2 = latLngToSvg(south, lng, MAP_WIDTH, MAP_HEIGHT, PADDING);
+      gridLines.push(
+        <line key={`lng-${lng}`} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
+          stroke={state.grid.color} strokeWidth="0.6" opacity={state.grid.opacity} />
+      );
+      if (state.grid.showLabels) {
+        gridLines.push(
+          <text key={`lng-l-${lng}`} x={p1.x} y={p1.y - 4} fontSize="7"
+            fill={state.grid.color} textAnchor="middle" opacity="0.8">{lng.toFixed(2)}°E</text>
+        );
+      }
+    }
   }
 
-  // Province boundary path
   const provincePath = pointsToPath(PROVINCE_BOUNDARY, MAP_WIDTH, MAP_HEIGHT, PADDING);
-  
-  // Lingayen Gulf path (water area)
   const gulfPath = pointsToPath(LINGAYEN_GULF, MAP_WIDTH, MAP_HEIGHT, PADDING);
-  
-  // River path
   const riverPath = pointsToPath(AGNO_RIVER, MAP_WIDTH, MAP_HEIGHT, PADDING, false);
-  
-  // Mountain range paths
+  const bayambangRiverPath = pointsToPath(BAYAMBANG_RIVER, MAP_WIDTH, MAP_HEIGHT, PADDING, false);
+  const fabRiverPath = pointsToPath(FABRICATION_RIVER, MAP_WIDTH, MAP_HEIGHT, PADDING, false);
   const cordilleraPath = pointsToPath(CORDILLERA_RANGE, MAP_WIDTH, MAP_HEIGHT, PADDING, false);
   const zambalesPath = pointsToPath(ZAMBALES_RANGE, MAP_WIDTH, MAP_HEIGHT, PADDING, false);
+
+  // Calculate distance between two markers
+  const getDistance = (m1: MarkerData, m2: MarkerData): string => {
+    const R = 6371;
+    const dLat = (m2.lat - m1.lat) * Math.PI / 180;
+    const dLng = (m2.lng - m1.lng) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(m1.lat * Math.PI / 180) * Math.cos(m2.lat * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+    const d = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return d < 1 ? `${(d * 1000).toFixed(0)}m` : `${d.toFixed(1)}km`;
+  };
+
+  const cursorStyle = state.toolMode === 'pan' ? (isPanning ? 'grabbing' : 'grab')
+    : state.toolMode === 'place-marker' ? 'crosshair'
+    : state.toolMode === 'draw-line' ? 'cell'
+    : state.toolMode === 'delete' ? 'not-allowed'
+    : state.toolMode === 'measure' ? 'crosshair'
+    : 'default';
 
   return (
     <div className="relative w-full h-full overflow-hidden bg-slate-900">
       <svg
         ref={svgRef}
         viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`}
-        className={`w-full h-full ${isAddingMode ? 'cursor-crosshair' : isPanning ? 'cursor-grabbing' : 'cursor-grab'}`}
+        className="w-full h-full"
+        style={{ cursor: cursorStyle, userSelect: 'none' }}
         onClick={handleSvgClick}
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-        style={{ userSelect: 'none' }}
+        onMouseLeave={() => { handleMouseUp(); setCursorPos(null); }}
       >
         <defs>
-          {/* Ocean gradient */}
-          <radialGradient id="oceanGradient" cx="30%" cy="30%">
+          <radialGradient id="oceanGrad" cx="30%" cy="30%">
             <stop offset="0%" stopColor="#1e3a5f" />
-            <stop offset="50%" stopColor="#1a365d" />
             <stop offset="100%" stopColor="#0f2440" />
           </radialGradient>
-          
-          {/* Land gradient */}
-          <linearGradient id="landGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#4a7c59" />
-            <stop offset="30%" stopColor="#5a8f6a" />
-            <stop offset="60%" stopColor="#6ba37a" />
-            <stop offset="100%" stopColor="#4d8b5e" />
+          <linearGradient id="landGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#3d6b4a" />
+            <stop offset="50%" stopColor="#4a7c59" />
+            <stop offset="100%" stopColor="#3d6b4a" />
           </linearGradient>
-          
-          {/* Mountain gradient */}
-          <linearGradient id="mountainGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#8B7355" />
-            <stop offset="100%" stopColor="#6B5B45" />
-          </linearGradient>
-
-          {/* Water pattern */}
-          <pattern id="waterPattern" patternUnits="userSpaceOnUse" width="20" height="20">
-            <path d="M 0 10 Q 5 8 10 10 Q 15 12 20 10" stroke="#2563eb" strokeWidth="0.3" fill="none" opacity="0.3"/>
+          <pattern id="waterPat" patternUnits="userSpaceOnUse" width="20" height="20">
+            <path d="M 0 10 Q 5 8 10 10 Q 15 12 20 10" stroke="#2563eb" strokeWidth="0.3" fill="none" opacity="0.3" />
           </pattern>
-
-          {/* Terrain texture */}
-          <pattern id="terrainTexture" patternUnits="userSpaceOnUse" width="40" height="40">
-            <circle cx="5" cy="5" r="1" fill="#3d6b4a" opacity="0.3"/>
-            <circle cx="25" cy="15" r="0.8" fill="#3d6b4a" opacity="0.2"/>
-            <circle cx="15" cy="30" r="1.2" fill="#3d6b4a" opacity="0.25"/>
-            <circle cx="35" cy="35" r="0.6" fill="#3d6b4a" opacity="0.2"/>
+          <pattern id="terrainPat" patternUnits="userSpaceOnUse" width="30" height="30">
+            <circle cx="5" cy="5" r="0.8" fill="#2d5a3a" opacity="0.3" />
+            <circle cx="20" cy="12" r="0.6" fill="#2d5a3a" opacity="0.2" />
+            <circle cx="12" cy="25" r="0.7" fill="#2d5a3a" opacity="0.25" />
           </pattern>
-
-          {/* Drop shadow filter */}
-          <filter id="dropShadow" x="-20%" y="-20%" width="140%" height="140%">
-            <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="#000" floodOpacity="0.3"/>
-          </filter>
-
-          {/* Glow filter for selected markers */}
           <filter id="glow">
-            <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
-            <feMerge>
-              <feMergeNode in="coloredBlur"/>
-              <feMergeNode in="SourceGraphic"/>
-            </feMerge>
+            <feGaussianBlur stdDeviation="2.5" result="blur" />
+            <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
           </filter>
-
-          {/* Marker pin shape */}
-          <symbol id="markerPin" viewBox="0 0 24 36">
-            <path d="M12 0 C5.4 0 0 5.4 0 12 C0 21 12 36 12 36 C12 36 24 21 24 12 C24 5.4 18.6 0 12 0 Z" />
-            <circle cx="12" cy="12" r="6" fill="white" opacity="0.9"/>
-          </symbol>
+          <filter id="shadow">
+            <feDropShadow dx="1" dy="1" stdDeviation="1.5" floodColor="#000" floodOpacity="0.4" />
+          </filter>
+          <marker id="arrowHead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="context-stroke" />
+          </marker>
         </defs>
 
-        {/* Ocean background */}
-        <rect x="0" y="0" width={MAP_WIDTH} height={MAP_HEIGHT} fill="url(#oceanGradient)" />
-        
-        {/* Water wave pattern overlay */}
-        <rect x="0" y="0" width={MAP_WIDTH} height={MAP_HEIGHT} fill="url(#waterPattern)" opacity="0.5" />
+        {/* Ocean */}
+        <rect x="-200" y="-200" width={MAP_WIDTH + 400} height={MAP_HEIGHT + 400} fill="url(#oceanGrad)" />
+        <rect x="-200" y="-200" width={MAP_WIDTH + 400} height={MAP_HEIGHT + 400} fill="url(#waterPat)" opacity="0.4" />
 
-        {/* Grid lines */}
+        {/* Grid */}
         {gridLines}
 
-        {/* Lingayen Gulf water area */}
-        <path d={gulfPath} fill="#1e40af" opacity="0.4" />
-        <text 
-          x={latLngToSvg(16.1, 119.7, MAP_WIDTH, MAP_HEIGHT, PADDING).x}
+        {/* Gulf */}
+        <path d={gulfPath} fill="#1e40af" opacity="0.35" />
+        <text x={latLngToSvg(16.1, 119.7, MAP_WIDTH, MAP_HEIGHT, PADDING).x}
           y={latLngToSvg(16.1, 119.7, MAP_WIDTH, MAP_HEIGHT, PADDING).y}
-          fontSize="14" 
-          fill="#60a5fa" 
-          textAnchor="middle"
-          fontStyle="italic"
-          opacity="0.8"
-          transform={`rotate(-15, ${latLngToSvg(16.1, 119.7, MAP_WIDTH, MAP_HEIGHT, PADDING).x}, ${latLngToSvg(16.1, 119.7, MAP_WIDTH, MAP_HEIGHT, PADDING).y})`}
-        >
+          fontSize="12" fill="#60a5fa" textAnchor="middle" fontStyle="italic" opacity="0.7"
+          transform={`rotate(-15, ${latLngToSvg(16.1, 119.7, MAP_WIDTH, MAP_HEIGHT, PADDING).x}, ${latLngToSvg(16.1, 119.7, MAP_WIDTH, MAP_HEIGHT, PADDING).y})`}>
           Lingayen Gulf
         </text>
 
-        {/* West Philippine Sea label */}
-        <text
-          x={latLngToSvg(16.0, 119.82, MAP_WIDTH, MAP_HEIGHT, PADDING).x - 30}
-          y={latLngToSvg(16.0, 119.82, MAP_WIDTH, MAP_HEIGHT, PADDING).y}
-          fontSize="11"
-          fill="#60a5fa"
-          textAnchor="middle"
-          fontStyle="italic"
-          opacity="0.6"
-          transform={`rotate(-75, ${latLngToSvg(16.0, 119.82, MAP_WIDTH, MAP_HEIGHT, PADDING).x - 30}, ${latLngToSvg(16.0, 119.82, MAP_WIDTH, MAP_HEIGHT, PADDING).y})`}
-        >
-          West Philippine Sea
-        </text>
+        {/* Province shadow */}
+        <path d={provincePath} fill="#000" opacity="0.15" transform="translate(3, 3)" />
+        {/* Province land */}
+        <path d={provincePath} fill="url(#landGrad)" stroke="#2d5a3a" strokeWidth="2" />
+        <path d={provincePath} fill="url(#terrainPat)" />
 
-        {/* Province land mass - shadow */}
-        <path d={provincePath} fill="#000" opacity="0.2" transform="translate(3, 3)" />
-        
-        {/* Province land mass */}
-        <path d={provincePath} fill="url(#landGradient)" stroke="#2d5a3a" strokeWidth="2" />
-        
-        {/* Terrain texture overlay */}
-        <path d={provincePath} fill="url(#terrainTexture)" />
-
-        {/* Elevation shading - flat plains area */}
-        <ellipse 
-          cx={latLngToSvg(15.95, 120.35, MAP_WIDTH, MAP_HEIGHT, PADDING).x}
-          cy={latLngToSvg(15.95, 120.35, MAP_WIDTH, MAP_HEIGHT, PADDING).y}
-          rx="120" ry="80"
-          fill="#7cb88a" opacity="0.2"
-        />
-
-        {/* Mountain ranges */}
-        {showMountains && (
+        {/* Rivers */}
+        {state.showRivers && (
           <>
-            {/* Cordillera Mountains (NE) */}
-            <path d={cordilleraPath} stroke="#8B7355" strokeWidth="8" fill="none" opacity="0.4" strokeLinecap="round" />
-            <path d={cordilleraPath} stroke="#6B5B45" strokeWidth="4" fill="none" opacity="0.6" strokeLinecap="round" strokeDasharray="2,6" />
-            {/* Mountain symbols */}
-            {CORDILLERA_RANGE.map(([lat, lng], i) => {
-              const pos = latLngToSvg(lat, lng, MAP_WIDTH, MAP_HEIGHT, PADDING);
-              return (
-                <g key={`cord-${i}`} transform={`translate(${pos.x}, ${pos.y})`}>
-                  <polygon points="0,-8 -6,4 6,4" fill="#8B7355" opacity="0.7" />
-                  <polygon points="0,-5 -3,2 3,2" fill="#a08060" opacity="0.5" />
-                </g>
-              );
-            })}
-            <text
-              x={latLngToSvg(16.15, 120.65, MAP_WIDTH, MAP_HEIGHT, PADDING).x}
-              y={latLngToSvg(16.15, 120.65, MAP_WIDTH, MAP_HEIGHT, PADDING).y}
-              fontSize="9" fill="#8B7355" textAnchor="middle" fontWeight="bold" opacity="0.8"
-            >
-              Cordillera Central
-            </text>
-
-            {/* Zambales Mountains (W) */}
-            <path d={zambalesPath} stroke="#8B7355" strokeWidth="6" fill="none" opacity="0.4" strokeLinecap="round" />
-            <path d={zambalesPath} stroke="#6B5B45" strokeWidth="3" fill="none" opacity="0.6" strokeLinecap="round" strokeDasharray="2,5" />
-            {ZAMBALES_RANGE.map(([lat, lng], i) => {
-              const pos = latLngToSvg(lat, lng, MAP_WIDTH, MAP_HEIGHT, PADDING);
-              return (
-                <g key={`zam-${i}`} transform={`translate(${pos.x}, ${pos.y})`}>
-                  <polygon points="0,-6 -5,3 5,3" fill="#8B7355" opacity="0.7" />
-                </g>
-              );
-            })}
-            <text
-              x={latLngToSvg(15.95, 120.05, MAP_WIDTH, MAP_HEIGHT, PADDING).x}
-              y={latLngToSvg(15.95, 120.05, MAP_WIDTH, MAP_HEIGHT, PADDING).y}
-              fontSize="9" fill="#8B7355" textAnchor="middle" fontWeight="bold" opacity="0.8"
-              transform={`rotate(-60, ${latLngToSvg(15.95, 120.05, MAP_WIDTH, MAP_HEIGHT, PADDING).x}, ${latLngToSvg(15.95, 120.05, MAP_WIDTH, MAP_HEIGHT, PADDING).y})`}
-            >
-              Zambales Mts.
-            </text>
+            <path d={riverPath} stroke="#2563eb" strokeWidth="3" fill="none" opacity="0.5" strokeLinecap="round" />
+            <path d={riverPath} stroke="#60a5fa" strokeWidth="1.5" fill="none" opacity="0.7" strokeLinecap="round" />
+            <path d={bayambangRiverPath} stroke="#2563eb" strokeWidth="2" fill="none" opacity="0.4" strokeLinecap="round" />
+            <path d={bayambangRiverPath} stroke="#60a5fa" strokeWidth="1" fill="none" opacity="0.6" strokeLinecap="round" />
+            <path d={fabRiverPath} stroke="#2563eb" strokeWidth="2" fill="none" opacity="0.4" strokeLinecap="round" />
+            <path d={fabRiverPath} stroke="#60a5fa" strokeWidth="1" fill="none" opacity="0.6" strokeLinecap="round" />
           </>
         )}
 
-        {/* Rivers */}
-        {showRivers && (
+        {/* Mountains */}
+        {state.showMountains && (
           <>
-            <path d={riverPath} stroke="#3b82f6" strokeWidth="3" fill="none" opacity="0.6" strokeLinecap="round" />
-            <path d={riverPath} stroke="#60a5fa" strokeWidth="1.5" fill="none" opacity="0.8" strokeLinecap="round" />
-            <text
-              x={latLngToSvg(15.92, 120.18, MAP_WIDTH, MAP_HEIGHT, PADDING).x + 10}
-              y={latLngToSvg(15.92, 120.18, MAP_WIDTH, MAP_HEIGHT, PADDING).y}
-              fontSize="9" fill="#3b82f6" fontStyle="italic" opacity="0.8"
-              transform={`rotate(-30, ${latLngToSvg(15.92, 120.18, MAP_WIDTH, MAP_HEIGHT, PADDING).x + 10}, ${latLngToSvg(15.92, 120.18, MAP_WIDTH, MAP_HEIGHT, PADDING).y})`}
-            >
-              Agno River
-            </text>
+            <path d={cordilleraPath} stroke="#8B7355" strokeWidth="8" fill="none" opacity="0.3" strokeLinecap="round" />
+            <path d={cordilleraPath} stroke="#6B5B45" strokeWidth="3" fill="none" opacity="0.5" strokeLinecap="round" strokeDasharray="2,6" />
+            {CORDILLERA_RANGE.map(([lat, lng], i) => {
+              const pos = latLngToSvg(lat, lng, MAP_WIDTH, MAP_HEIGHT, PADDING);
+              return <polygon key={`c${i}`} points={`${pos.x},${pos.y - 7} ${pos.x - 5},${pos.y + 3} ${pos.x + 5},${pos.y + 3}`}
+                fill="#8B7355" opacity="0.6" />;
+            })}
+            <path d={zambalesPath} stroke="#8B7355" strokeWidth="6" fill="none" opacity="0.3" strokeLinecap="round" />
+            {ZAMBALES_RANGE.map(([lat, lng], i) => {
+              const pos = latLngToSvg(lat, lng, MAP_WIDTH, MAP_HEIGHT, PADDING);
+              return <polygon key={`z${i}`} points={`${pos.x},${pos.y - 5} ${pos.x - 4},${pos.y + 2} ${pos.x + 4},${pos.y + 2}`}
+                fill="#8B7355" opacity="0.6" />;
+            })}
           </>
         )}
 
         {/* Hundred Islands */}
         {HUNDRED_ISLANDS.map(([lat, lng], i) => {
           const pos = latLngToSvg(lat, lng, MAP_WIDTH, MAP_HEIGHT, PADDING);
-          const rx = 4 + ((i * 7 + 3) % 5);
-          const ry = 3 + ((i * 5 + 2) % 4);
+          return <ellipse key={`isl${i}`} cx={pos.x} cy={pos.y} rx={3 + (i % 3)} ry={2 + (i % 2)}
+            fill="#5a8f6a" stroke="#2d5a3a" strokeWidth="0.5" />;
+        })}
+
+        {/* Roads */}
+        {state.showRoads && ROADS.map((road, i) => {
+          const path = pointsToPath(road.points, MAP_WIDTH, MAP_HEIGHT, PADDING, false);
+          const roadColor = road.type === 'national' ? '#f59e0b' : road.type === 'provincial' ? '#94a3b8' : '#64748b';
+          const roadWidth = road.type === 'national' ? 3 : road.type === 'provincial' ? 2 : 1;
           return (
-            <g key={`island-${i}`}>
-              <ellipse cx={pos.x} cy={pos.y} rx={rx} ry={ry} fill="#5a8f6a" stroke="#2d5a3a" strokeWidth="0.5" />
+            <g key={`road-${i}`}>
+              <path d={path} stroke="#1e293b" strokeWidth={roadWidth + 1.5} fill="none" opacity="0.6" strokeLinecap="round" strokeLinejoin="round" />
+              <path d={path} stroke={roadColor} strokeWidth={roadWidth} fill="none" opacity="0.7" strokeLinecap="round" strokeLinejoin="round" />
+              {road.type === 'national' && (
+                <path d={path} stroke="#fbbf24" strokeWidth="0.5" fill="none" opacity="0.5" strokeLinecap="round" strokeDasharray="8,8" />
+              )}
             </g>
           );
         })}
-        <text
-          x={latLngToSvg(16.10, 119.98, MAP_WIDTH, MAP_HEIGHT, PADDING).x}
-          y={latLngToSvg(16.10, 119.98, MAP_WIDTH, MAP_HEIGHT, PADDING).y - 15}
-          fontSize="8" fill="#60a5fa" textAnchor="middle" fontStyle="italic"
-        >
-          Hundred Islands
-        </text>
 
-        {/* Municipality dots and labels */}
-        {showMunicipalities && MUNICIPALITIES.map((muni) => {
+        {/* Municipalities */}
+        {state.showMunicipalities && MUNICIPALITIES.map((muni) => {
           const pos = latLngToSvg(muni.lat, muni.lng, MAP_WIDTH, MAP_HEIGHT, PADDING);
-          const isCity = muni.population > 100000;
           return (
             <g key={muni.name}>
-              <circle
-                cx={pos.x}
-                cy={pos.y}
-                r={isCity ? 4 : 2.5}
-                fill={isCity ? '#fbbf24' : '#e2e8f0'}
-                stroke="#1e293b"
-                strokeWidth="0.8"
-              />
-              {showLabels && (
-                <text
-                  x={pos.x + 6}
-                  y={pos.y + 3}
-                  fontSize={isCity ? '9' : '7'}
-                  fill={isCity ? '#fbbf24' : '#cbd5e1'}
-                  fontWeight={isCity ? 'bold' : 'normal'}
-                  opacity="0.9"
-                >
+              <circle cx={pos.x} cy={pos.y} r={muni.isCity ? 3.5 : 2}
+                fill={muni.isCity ? '#fbbf24' : '#cbd5e1'} stroke="#1e293b" strokeWidth="0.6" />
+              {state.showLabels && (
+                <text x={pos.x + 5} y={pos.y + 3} fontSize={muni.isCity ? '8' : '6'}
+                  fill={muni.isCity ? '#fbbf24' : '#94a3b8'} fontWeight={muni.isCity ? 'bold' : 'normal'} opacity="0.8">
                   {muni.name}
                 </text>
               )}
@@ -378,66 +444,92 @@ export default function CustomMap({
         })}
 
         {/* Province boundary highlight */}
-        <path d={provincePath} fill="none" stroke="#fbbf24" strokeWidth="1" opacity="0.3" strokeDasharray="8,4" />
+        <path d={provincePath} fill="none" stroke="#fbbf24" strokeWidth="0.8" opacity="0.25" strokeDasharray="6,4" />
 
-        {/* Custom Markers */}
-        {markers.map((marker) => {
-          const pos = latLngToSvg(marker.lat, marker.lng, MAP_WIDTH, MAP_HEIGHT, PADDING);
-          const isSelected = selectedMarker === marker.id;
-          const isHovered = hoveredMarker === marker.id;
-          const scale = isSelected ? 1.3 : isHovered ? 1.15 : 1;
-          
+        {/* Connection Lines */}
+        {state.lines.map((line) => {
+          const from = state.markers.find(m => m.id === line.fromMarkerId);
+          const to = state.markers.find(m => m.id === line.toMarkerId);
+          if (!from || !to) return null;
+          const p1 = latLngToSvg(from.lat, from.lng, MAP_WIDTH, MAP_HEIGHT, PADDING);
+          const p2 = latLngToSvg(to.lat, to.lng, MAP_WIDTH, MAP_HEIGHT, PADDING);
+          const isSelected = state.selectedLineId === line.id;
+          const styleInfo = LINE_STYLES[line.style];
+          const midX = (p1.x + p2.x) / 2;
+          const midY = (p1.y + p2.y) / 2;
+
           return (
-            <g
-              key={marker.id}
-              transform={`translate(${pos.x}, ${pos.y}) scale(${scale})`}
-              style={{ cursor: 'pointer', transformOrigin: `${pos.x}px ${pos.y}px` }}
-              onClick={(e) => { e.stopPropagation(); onMarkerClick(marker.id); }}
-              onMouseEnter={(e) => {
-                setHoveredMarker(marker.id);
-                const rect = svgRef.current?.getBoundingClientRect();
-                if (rect) {
-                  setTooltip({
-                    x: e.clientX - rect.left,
-                    y: e.clientY - rect.top - 40,
-                    marker,
-                  });
-                }
-              }}
-              onMouseLeave={() => {
-                setHoveredMarker(null);
-                setTooltip(null);
-              }}
-              filter={isSelected ? 'url(#glow)' : undefined}
-            >
-              {/* Marker shadow */}
-              <ellipse cx="0" cy="2" rx="6" ry="2" fill="#000" opacity="0.3" />
-              
-              {/* Marker pin */}
-              <path
-                d="M 0 -24 C -8 -24 -12 -18 -12 -12 C -12 -4 0 4 0 4 C 0 4 12 -4 12 -12 C 12 -18 8 -24 0 -24 Z"
-                fill={marker.color}
-                stroke="white"
-                strokeWidth="1.5"
+            <g key={line.id} onClick={(e) => { e.stopPropagation(); onLineClick(line.id); }} style={{ cursor: 'pointer' }}>
+              {/* Double line effect */}
+              {line.style === 'double' && (
+                <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
+                  stroke={line.color} strokeWidth={line.width + 4} opacity="0.3" strokeLinecap="round" />
+              )}
+              <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
+                stroke={line.color}
+                strokeWidth={line.style === 'thick' ? line.width + 2 : line.width}
+                strokeDasharray={styleInfo.dasharray}
+                strokeLinecap="round"
+                markerEnd={line.style === 'arrow' ? 'url(#arrowHead)' : undefined}
+                opacity={isSelected ? 1 : 0.8}
+                filter={isSelected ? 'url(#glow)' : undefined}
               />
-              
-              {/* Inner circle */}
-              <circle cx="0" cy="-14" r="5" fill="white" opacity="0.9" />
-              
-              {/* Category icon */}
-              <text
-                x="0"
-                y="-11"
-                textAnchor="middle"
-                fontSize="7"
-                dominantBaseline="middle"
-              >
-                {CATEGORIES[marker.category]?.icon || '📍'}
-              </text>
+              {/* Selection highlight */}
+              {isSelected && (
+                <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
+                  stroke="white" strokeWidth={line.width + 4} opacity="0.2" strokeLinecap="round" />
+              )}
+              {/* Line label */}
+              {(line.label || line.showDistance) && (
+                <g transform={`translate(${midX}, ${midY})`}>
+                  <rect x={-30} y={-10} width="60" height="14" rx="3" fill="rgba(15,23,42,0.85)" stroke={line.color} strokeWidth="0.5" />
+                  <text x="0" y="1" textAnchor="middle" fontSize="7" fill="white">
+                    {line.label}{line.showDistance ? ` (${getDistance(from, to)})` : ''}
+                  </text>
+                </g>
+              )}
+            </g>
+          );
+        })}
 
+        {/* Markers */}
+        {state.markers.map((marker) => {
+          const pos = latLngToSvg(marker.lat, marker.lng, MAP_WIDTH, MAP_HEIGHT, PADDING);
+          const isSelected = state.selectedMarkerId === marker.id;
+          const isHovered = hoveredMarker === marker.id;
+          const scale = isSelected ? 1.2 : isHovered ? 1.1 : 1;
+
+          return (
+            <g key={marker.id}
+              transform={`translate(${pos.x}, ${pos.y}) scale(${scale})`}
+              style={{ cursor: state.toolMode === 'select' ? 'move' : state.toolMode === 'delete' ? 'pointer' : 'default' }}
+              onMouseDown={(e) => handleMarkerMouseDown(e, marker.id)}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (state.toolMode === 'delete') {
+                  // handled by parent
+                }
+                onMarkerClick(marker.id);
+              }}
+              onMouseEnter={() => {
+                setHoveredMarker(marker.id);
+                setTooltip({ x: pos.x, y: pos.y - 20, text: `${marker.label || marker.name}\n${marker.lat.toFixed(4)}°N, ${marker.lng.toFixed(4)}°E` });
+              }}
+              onMouseLeave={() => { setHoveredMarker(null); setTooltip(null); }}
+              filter={isSelected ? 'url(#glow)' : 'url(#shadow)'}
+            >
+              {renderMarkerShape(marker.shape, marker.color, marker.size)}
+              {/* Label */}
+              {marker.label && (
+                <text x="0" y={marker.size + 8} textAnchor="middle" fontSize="7"
+                  fill="white" fontWeight="bold" opacity="0.9"
+                  style={{ textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
+                  {marker.label}
+                </text>
+              )}
               {/* Selection ring */}
               {isSelected && (
-                <circle cx="0" cy="-14" r="16" fill="none" stroke={marker.color} strokeWidth="2" opacity="0.6" strokeDasharray="4,2">
+                <circle cx="0" cy="0" r={marker.size + 4} fill="none" stroke="white" strokeWidth="1.5" opacity="0.6" strokeDasharray="4,2">
                   <animate attributeName="stroke-dashoffset" values="0;12" dur="1s" repeatCount="indefinite" />
                 </circle>
               )}
@@ -446,49 +538,44 @@ export default function CustomMap({
         })}
 
         {/* Compass Rose */}
-        <g transform={`translate(${MAP_WIDTH - 80}, ${MAP_HEIGHT - 80})`}>
-          <circle cx="0" cy="0" r="25" fill="rgba(15, 23, 42, 0.8)" stroke="#475569" strokeWidth="1" />
-          <polygon points="0,-20 -4,-5 0,-8 4,-5" fill="#ef4444" />
-          <polygon points="0,20 -4,5 0,8 4,5" fill="#94a3b8" />
-          <polygon points="-20,0 -5,-4 -8,0 -5,4" fill="#94a3b8" />
-          <polygon points="20,0 5,-4 8,0 5,4" fill="#94a3b8" />
-          <text x="0" y="-26" textAnchor="middle" fontSize="8" fill="#ef4444" fontWeight="bold">N</text>
-          <text x="0" y="32" textAnchor="middle" fontSize="7" fill="#94a3b8">S</text>
-          <text x="-28" y="3" textAnchor="middle" fontSize="7" fill="#94a3b8">W</text>
-          <text x="28" y="3" textAnchor="middle" fontSize="7" fill="#94a3b8">E</text>
-          <circle cx="0" cy="0" r="3" fill="#fbbf24" />
+        <g transform={`translate(${MAP_WIDTH - 70}, ${MAP_HEIGHT - 70})`}>
+          <circle cx="0" cy="0" r="22" fill="rgba(15, 23, 42, 0.85)" stroke="#475569" strokeWidth="1" />
+          <polygon points="0,-18 -3,-4 0,-7 3,-4" fill="#ef4444" />
+          <polygon points="0,18 -3,4 0,7 3,4" fill="#64748b" />
+          <polygon points="-18,0 -4,-3 -7,0 -4,3" fill="#64748b" />
+          <polygon points="18,0 4,-3 7,0 4,3" fill="#64748b" />
+          <text x="0" y="-23" textAnchor="middle" fontSize="7" fill="#ef4444" fontWeight="bold">N</text>
+          <circle cx="0" cy="0" r="2.5" fill="#fbbf24" />
         </g>
 
         {/* Scale bar */}
-        <g transform={`translate(${MAP_WIDTH - 200}, ${MAP_HEIGHT - 30})`}>
-          <line x1="0" y1="0" x2="80" y2="0" stroke="#e2e8f0" strokeWidth="2" />
-          <line x1="0" y1="-4" x2="0" y2="4" stroke="#e2e8f0" strokeWidth="2" />
-          <line x1="80" y1="-4" x2="80" y2="4" stroke="#e2e8f0" strokeWidth="2" />
-          <text x="40" y="-8" textAnchor="middle" fontSize="8" fill="#e2e8f0">~25 km</text>
+        <g transform={`translate(${MAP_WIDTH - 180}, ${MAP_HEIGHT - 25})`}>
+          <line x1="0" y1="0" x2="70" y2="0" stroke="#e2e8f0" strokeWidth="1.5" />
+          <line x1="0" y1="-3" x2="0" y2="3" stroke="#e2e8f0" strokeWidth="1.5" />
+          <line x1="70" y1="-3" x2="70" y2="3" stroke="#e2e8f0" strokeWidth="1.5" />
+          <text x="35" y="-6" textAnchor="middle" fontSize="7" fill="#e2e8f0">~25 km</text>
         </g>
 
-        {/* Title cartouche */}
-        <g transform={`translate(30, 30)`}>
-          <rect x="0" y="0" width="200" height="50" rx="8" fill="rgba(15, 23, 42, 0.9)" stroke="#fbbf24" strokeWidth="1.5" />
-          <text x="100" y="22" textAnchor="middle" fontSize="16" fill="#fbbf24" fontWeight="bold">PANGASINAN</text>
-          <text x="100" y="38" textAnchor="middle" fontSize="9" fill="#94a3b8">Province of the Philippines</text>
+        {/* Title */}
+        <g transform="translate(25, 25)">
+          <rect width="180" height="42" rx="6" fill="rgba(15, 23, 42, 0.92)" stroke="#fbbf24" strokeWidth="1" />
+          <text x="90" y="18" textAnchor="middle" fontSize="14" fill="#fbbf24" fontWeight="bold">PANGASINAN</text>
+          <text x="90" y="32" textAnchor="middle" fontSize="8" fill="#94a3b8">Engineering Map System v2.0</text>
         </g>
       </svg>
 
+      {/* Coordinate readout */}
+      {cursorPos && (
+        <div className="absolute bottom-4 right-4 z-20 bg-slate-900/95 backdrop-blur-sm border border-slate-600 rounded-lg px-3 py-1.5 text-xs font-mono text-green-400">
+          LAT: {cursorPos.lat.toFixed(5)}°N &nbsp; LNG: {cursorPos.lng.toFixed(5)}°E
+        </div>
+      )}
+
       {/* Tooltip */}
       {tooltip && (
-        <div
-          className="absolute pointer-events-none z-50 bg-slate-800 border border-slate-600 rounded-lg shadow-xl px-3 py-2 max-w-[250px]"
-          style={{ left: tooltip.x, top: tooltip.y, transform: 'translate(-50%, -100%)' }}
-        >
-          <div className="flex items-center gap-2">
-            <span>{CATEGORIES[tooltip.marker.category]?.icon}</span>
-            <span className="text-white font-semibold text-sm">{tooltip.marker.name}</span>
-          </div>
-          <p className="text-slate-300 text-xs mt-1 line-clamp-2">{tooltip.marker.description}</p>
-          <p className="text-slate-500 text-xs mt-1">
-            {tooltip.marker.lat.toFixed(4)}°N, {tooltip.marker.lng.toFixed(4)}°E
-          </p>
+        <div className="absolute z-50 pointer-events-none bg-slate-800 border border-slate-500 rounded px-2 py-1 text-xs text-white whitespace-pre-line shadow-lg"
+          style={{ left: '50%', top: '10px', transform: 'translateX(-50%)' }}>
+          {tooltip.text}
         </div>
       )}
     </div>

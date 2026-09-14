@@ -1,7 +1,16 @@
 @import "tailwindcss";
 
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #0f172a;
+}
+
 .sidebar-scroll::-webkit-scrollbar {
-  width: 6px;
+  width: 5px;
 }
 
 .sidebar-scroll::-webkit-scrollbar-track {
@@ -17,13 +26,58 @@
   background: #64748b;
 }
 
-/* Smooth transitions for SVG elements */
-svg * {
-  transition: opacity 0.2s ease;
-}
-
-/* Prevent text selection on map */
+/* SVG transitions */
 svg text {
   user-select: none;
   -webkit-user-select: none;
+  pointer-events: none;
+}
+
+svg g[style*="cursor"] text {
+  pointer-events: none;
+}
+
+/* Range input styling */
+input[type="range"] {
+  height: 4px;
+  border-radius: 2px;
+  background: #334155;
+  outline: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #3b82f6;
+  cursor: pointer;
+  border: 2px solid #1e293b;
+}
+
+/* Checkbox styling */
+input[type="checkbox"] {
+  cursor: pointer;
+}
+
+/* Select styling */
+select {
+  cursor: pointer;
+}
+
+/* Animation for selection ring */
+@keyframes pulse-ring {
+  0% { opacity: 0.6; }
+  50% { opacity: 0.2; }
+  100% { opacity: 0.6; }
+}
+
+/* Tooltip animation */
+.tooltip-enter {
+  animation: fadeIn 0.15s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
